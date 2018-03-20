@@ -8,7 +8,7 @@ Count (W)ords from (S)econdary items across commits in a (G)it respository.
 
 from __future__ import print_function
 
-from datetime import datetime
+import datetime
 import os
 import re
 import subprocess
@@ -16,6 +16,8 @@ import sys
 
 import attr
 from matplotlib import pyplot as plt
+import matplotlib.dates as mdates
+import numpy as np
 
 
 @attr.s(hash=True)
@@ -35,7 +37,7 @@ class WordCount(object):
 if hasattr(subprocess, "DEVNULL"):
     DEVNULL = subprocess.DEVNULL
 else:
-    DEVNULL = open(os.devnull,"w")
+    DEVNULL = open(os.devnull, "w")
 
 
 def git_log():
@@ -46,7 +48,7 @@ def git_log():
     for line in log.split("\n"):
         if line != "":
             hash, subject, datestring = line.split('|')
-            date = datetime.strptime(datestring[:16], "%Y-%m-%d %H:%M")
+            date = datetime.datetime.strptime(datestring[:16], "%Y-%m-%d %H:%M")
             commits.append(Commit(hash, subject, date))
     return commits
 
@@ -58,7 +60,7 @@ def git_checkout(hash):
 
 
 def parse_secondary_file(filename):
-    """parse a secondary file into a list of item"""
+    """parse a secondary file into a list of items"""
 
     items = []
 
@@ -137,28 +139,88 @@ def main(argv):
             git_checkout(commit.hash)
             all_wordcounts[commit] = get_wordcounts()
             filenames.update(set(x.name for x in all_wordcounts[commit]))
+
         data = []
+        for commit, wordcounts in all_wordcounts.items():
+            total_lines = sum([x.lines for x in wordcounts])
+            total_words = sum([x.words for x in wordcounts])
+            row = (commit.date, commit.subject, commit.hash, total_lines, total_words)
+            data.append(row)
+        data = sorted(data, key=lambda x: x[0])
+
         with open("wordcounts.tsv", "w") as output_file:
             output_file.write("\t".join(["date", "subject", "hash", "lines", "words"]) + "\n")
-            for commit, wordcounts in all_wordcounts.items():
-                total_lines = sum([x.lines for x in wordcounts])
-                total_words = sum([x.words for x in wordcounts])
-                row = (commit.date, commit.subject, commit.hash, total_lines, total_words)
-                data.append(row)
+            for row in data:
                 output_file.write("\t".join([str(x) for x in row]) + "\n")
-        data = sorted(data, key=lambda x: x[0])
+
+        # plot total word count after each commit
+
+        def round_date(x):
+          return datetime.datetime(*x.timetuple()[:3]).date()
+
+        def sunday_before(x):
+            """given a date, get the Sunday before, rounded to midnight"""
+            # https://stackoverflow.com/questions/18200530/get-the-last-sunday-and-saturdays-date-in-python
+            weekday_idx = (x.weekday() + 1) % 7
+            res = x - datetime.timedelta(weekday_idx)
+            return round_date(res)
+
+        date_first = data[0][0]
+        date_last = max(x[0] for x in data)
+        starting_wordcount = data[0][4]
+        graph_start_date = sunday_before(date_first)
+        graph_end_date = sunday_before(date_last + datetime.timedelta(7))
+        days_count = (graph_end_date - graph_start_date).days
+
+        title = "Word Count - " + "; ".join([x.replace("*", "") for x in ids])
+        ticks = [
+            round_date(graph_start_date + datetime.timedelta(7 * idx))
+            for idx in range(days_count // 7 + 1)]
+
         plt.plot([x[0] for x in data], [x[4] for x in data], marker="o")
-        plt.title("Word Count - " + "; ".join([x.replace("*", "") for x in ids]))
+        plt.xticks(ticks)
+        plt.title(title)
         plt.xlabel("datetime")
         plt.ylabel("word count")
+        plt.grid(True)
+        ax = plt.gca()
+        ax.set_axisbelow(True)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
         fig = plt.gcf()
         fig.autofmt_xdate()
         fig.set_size_inches(8, 6)
         fig.savefig("wordcounts.png", dpi=100)
         # plt.show()
 
+        #### aggregate writing by week
+
+        # group by sunday before
+        wordcounts_with_sunday = [(sunday_before(x[0]), x[4]) for x in data]
+        wordcounts_by_sunday = {}
+        for sunday, wordcount in wordcounts_with_sunday:
+            wordcounts = wordcounts_by_sunday.setdefault(sunday, [])
+            wordcounts.append(wordcount)
+        max_by_sunday = sorted([(k, max(v)) for k, v in wordcounts_by_sunday.items()], key=lambda x: x[0])
+
+        diffs = np.diff([starting_wordcount] + [x[1] for x in max_by_sunday])
+        sundays = [x[0] for x in max_by_sunday]
+
+        plt.clf()
+        plt.bar(range(len(diffs)), diffs, tick_label=sundays)
+        plt.title(title)
+        plt.xlabel("datetime")
+        plt.ylabel("word count")
+        plt.grid(True)
+        ax = plt.gca()
+        ax.set_axisbelow(True)
+        fig = plt.gcf()
+        fig.autofmt_xdate()
+        fig.set_size_inches(8, 6)
+        fig.savefig("weeks.png", dpi=100)
+
     finally:
         git_checkout("master")
+
 
 if __name__ == "__main__":
     main(sys.argv)
