@@ -3,13 +3,14 @@
 Count (W)ords from (S)econdary items across commits in a (G)it respository.
 
 """
-# Based on https://gist.github.com/hjwp/7542608
-# New functionality (c) 2018 Ben Zimmer. All rights reserved.
+# Copyright (c) 2018 Ben Zimmer. All rights reserved.
+# Inspired by https://gist.github.com/hjwp/7542608
 
 from __future__ import print_function
 
 import datetime
 import os
+import pickle
 import re
 import subprocess
 import sys
@@ -22,17 +23,19 @@ import numpy as np
 
 @attr.s(hash=True)
 class Commit(object):
-  hash = attr.ib()
-  subject = attr.ib()
-  date = attr.ib()
+    hash = attr.ib()
+    subject = attr.ib()
+    date = attr.ib()
 
 
 @attr.s(hash=True)
 class WordCount(object):
-  name = attr.ib()
-  lines = attr.ib()
-  words = attr.ib()
+    name = attr.ib()
+    lines = attr.ib()
+    words = attr.ib()
 
+
+CACHE_FILENAME = "wordcounts.pkl"
 
 if hasattr(subprocess, "DEVNULL"):
     DEVNULL = subprocess.DEVNULL
@@ -41,21 +44,23 @@ else:
 
 
 def git_log():
+    """run 'git log' and parse the output into commit objects"""
     commits = []
     log = subprocess.check_output(
         ["git", "log", "--format=%h|%s|%ai"], stderr=DEVNULL
     ).decode("utf8")
     for line in log.split("\n"):
         if line != "":
-            hash, subject, datestring = line.split('|')
+            commit_hash, subject, datestring = line.split('|')
             date = datetime.datetime.strptime(datestring[:16], "%Y-%m-%d %H:%M")
-            commits.append(Commit(hash, subject, date))
+            commits.append(Commit(commit_hash, subject, date))
     return commits
 
 
-def git_checkout(hash):
+def git_checkout(commit_hash):
+    """run 'git checkout'"""
     subprocess.check_call(
-        ["git", "checkout", hash],
+        ["git", "checkout", commit_hash],
         stderr=DEVNULL)
 
 
@@ -76,7 +81,7 @@ def parse_secondary_file(filename):
 
     for line in lines:
         if line.startswith("!"):
-            if item != None:
+            if item is not None:
                 items.append(item)
             item = {}
             state = 1
@@ -96,29 +101,19 @@ def parse_secondary_file(filename):
     return items
 
 
-def file_wordcounts(input_dir, ext):
-    docs = [f for f in os.listdir(input_dir) if f.endswith(ext)]
-    wordcounts = []
-    for filename in docs:
-        with open(os.path.join(input_dir, filename)) as f:
-            contents = f.read()
-        lines = contents.split("\n")
-        length_words = sum([len(line.split()) for line in lines])
-        wordcounts.append(WordCount(filename, len(lines), length_words))
-    return wordcounts
-
-
 def secondary_wordcounts(ids, input_dir, ext):
+    """count words of secondary files by item id or name"""
     docs = [f for f in os.listdir(input_dir) if f.endswith(ext)]
-    wordcounts = []
+    wordcounts = {}
     for filename in docs:
         items = parse_secondary_file(os.path.join(input_dir, filename))
         for item in items:
-            if item.get("id") in ids or item.get("name") in ids:
-                if item.get("notes") is not None:
-                    lines = item["notes"].split("\n")
-                    length_words = sum([len(line.split()) for line in lines])
-                    wordcounts.append(WordCount(filename, len(lines), length_words))
+            for identifier in ids:
+                if item.get("id") == identifier or item.get("name") == identifier:
+                    if item.get("notes") is not None:
+                        lines = item["notes"].split("\n")
+                        length_words = sum([len(line.split()) for line in lines])
+                        wordcounts[identifier] = WordCount(filename, len(lines), length_words)
     return wordcounts
 
 
@@ -127,23 +122,40 @@ def main(argv):
 
     input_dir = "content"
     ids = argv[1:]
-    # get_wordcounts = lambda: file_wordcounts(input_dir, ".sec")
     get_wordcounts = lambda: secondary_wordcounts(ids, input_dir, ".sec")
 
-    commits = git_log()
-    all_wordcounts = {}
-    filenames = set()
-    try:
-        for commit in commits:
-            print(commit.hash, commit.date, commit.subject)
-            git_checkout(commit.hash)
-            all_wordcounts[commit] = get_wordcounts()
-            filenames.update(set(x.name for x in all_wordcounts[commit]))
+    if os.path.exists(CACHE_FILENAME):
+        with open(CACHE_FILENAME, "rb") as cache_file:
+            all_wordcounts = pickle.load(cache_file)
+    else:
+        all_wordcounts = {}
 
+    commits = git_log()
+
+    try:
+        # update the master wordcounts cache
+        for commit in commits:
+            print(commit.hash, commit.date, commit.subject, end=" ")
+            # update wordcounts (for all ids) if some are not present
+            found = True
+            for identifier in ids:
+                if all_wordcounts.get(commit) is None or identifier not in all_wordcounts[commit]:
+                    found = False
+                    break
+            if not found:
+                print("*")
+                git_checkout(commit.hash)
+                commit_wordcounts = all_wordcounts.setdefault(commit, {})
+                for identifier, wordcount in get_wordcounts().items():
+                    commit_wordcounts[identifier] = wordcount
+            else:
+                print(".")
+
+        # extract the data for the current set of ids
         data = []
         for commit, wordcounts in all_wordcounts.items():
-            total_lines = sum([x.lines for x in wordcounts])
-            total_words = sum([x.words for x in wordcounts])
+            total_lines = sum([wordcounts[x].lines for x in ids])
+            total_words = sum([wordcounts[x].words for x in ids])
             row = (commit.date, commit.subject, commit.hash, total_lines, total_words)
             data.append(row)
         data = sorted(data, key=lambda x: x[0])
@@ -153,10 +165,14 @@ def main(argv):
             for row in data:
                 output_file.write("\t".join([str(x) for x in row]) + "\n")
 
-        # plot total word count after each commit
+        # save the cache
+        with open(CACHE_FILENAME, "wb") as cache_file:
+            pickle.dump(all_wordcounts, cache_file)
+
+        # -------- plot total word count after each commit --------
 
         def round_date(x):
-          return datetime.datetime(*x.timetuple()[:3]).date()
+            return datetime.datetime(*x.timetuple()[:3]).date()
 
         def sunday_before(x):
             """given a date, get the Sunday before, rounded to midnight"""
@@ -172,7 +188,8 @@ def main(argv):
         graph_end_date = sunday_before(date_last + datetime.timedelta(7))
         days_count = (graph_end_date - graph_start_date).days
 
-        title = "Word Count - " + "; ".join([x.replace("*", "") for x in ids])
+        ids_string = "; ".join([x.replace("*", "") for x in ids])
+        title = "Word Count - " + ids_string
         ticks = [
             round_date(graph_start_date + datetime.timedelta(7 * idx))
             for idx in range(days_count // 7 + 1)]
@@ -192,7 +209,7 @@ def main(argv):
         fig.savefig("wordcounts.png", dpi=100)
         # plt.show()
 
-        #### aggregate writing by week
+        # -------- aggregate words written per week --------
 
         # group by sunday before
         wordcounts_with_sunday = [(sunday_before(x[0]), x[4]) for x in data]
@@ -205,6 +222,7 @@ def main(argv):
         diffs = np.diff([starting_wordcount] + [x[1] for x in max_by_sunday])
         sundays = [x[0] for x in max_by_sunday]
 
+        title = "Words Written per Week - " + ids_string
         plt.clf()
         plt.bar(range(len(diffs)), diffs, tick_label=sundays)
         plt.title(title)
