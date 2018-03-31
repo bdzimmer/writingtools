@@ -212,15 +212,17 @@ def main(argv):
         # -------- aggregate words written per week --------
 
         # group by sunday before
-        wordcounts_with_sunday = [(sunday_before(x[0]), x[4]) for x in data]
+        wordcounts_with_sunday = [(sunday_before(x[0]), x[0], x[4]) for x in data]
         wordcounts_by_sunday = {}
-        for sunday, wordcount in wordcounts_with_sunday:
+        for sunday, day, wordcount in wordcounts_with_sunday:
             wordcounts = wordcounts_by_sunday.setdefault(sunday, [])
-            wordcounts.append(wordcount)
-        max_by_sunday = sorted([(k, max(v)) for k, v in wordcounts_by_sunday.items()], key=lambda x: x[0])
+            wordcounts.append((day, wordcount))
+        last_by_sunday = sorted([
+            (k, sorted(v, key=lambda x: x[0])[-1][1])
+            for k, v in wordcounts_by_sunday.items()], key=lambda x: x[0])
 
-        diffs = np.diff([starting_wordcount] + [x[1] for x in max_by_sunday])
-        sundays = [x[0] for x in max_by_sunday]
+        diffs = np.diff([starting_wordcount] + [x[1] for x in last_by_sunday])
+        sundays = [x[0] for x in last_by_sunday]
 
         title = "Words Written per Week - " + ids_string
         plt.clf()
