@@ -195,7 +195,7 @@ def main(argv):
             for idx in range(days_count // 7 + 1)]
 
         plt.plot([x[0] for x in data], [x[4] for x in data], marker="o")
-        plt.xticks(ticks)
+        plt.xticks(ticks, fontsize=8)
         plt.title(title)
         plt.xlabel("datetime")
         plt.ylabel("word count")
@@ -227,6 +227,7 @@ def main(argv):
         title = "Words Written per Week - " + ids_string
         plt.clf()
         plt.bar(range(len(diffs)), diffs, tick_label=sundays)
+        plt.xticks(fontsize=8)
         plt.title(title)
         plt.xlabel("datetime")
         plt.ylabel("word count")
