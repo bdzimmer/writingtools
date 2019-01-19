@@ -187,18 +187,22 @@ def main(argv):
         def round_date(x):
             return datetime.datetime(*x.timetuple()[:3]).date()
 
-        def sunday_before(x):
-            """given a date, get the Sunday before, rounded to midnight"""
+        def startday_before(x):
+            """given a date, get the start day before, rounded to midnight"""
             # https://stackoverflow.com/questions/18200530/get-the-last-sunday-and-saturdays-date-in-python
-            weekday_idx = (x.weekday() + 1) % 7
+            # convert monday-sunday to sunday-saturday
+            # sunday
+            # weekday_idx = (x.weekday() + 1) % 7
+            # monday
+            weekday_idx = (x.weekday()) % 7
             res = x - datetime.timedelta(weekday_idx)
             return round_date(res)
 
         date_first = data[0][0]
         date_last = max(x[0] for x in data)
         starting_wordcount = data[0][4]
-        graph_start_date = sunday_before(date_first)
-        graph_end_date = sunday_before(date_last + datetime.timedelta(7))
+        graph_start_date = startday_before(date_first)
+        graph_end_date = startday_before(date_last + datetime.timedelta(7))
         days_count = (graph_end_date - graph_start_date).days
 
         ids_string = "; ".join([x.replace("*", "") for x in ids])
@@ -224,22 +228,22 @@ def main(argv):
 
         # -------- aggregate words written per week --------
 
-        # group by sunday before
-        wordcounts_with_sunday = [(sunday_before(x[0]), x[0], x[4]) for x in data]
-        wordcounts_by_sunday = {}
-        for sunday, day, wordcount in wordcounts_with_sunday:
-            wordcounts = wordcounts_by_sunday.setdefault(sunday, [])
+        # group by start day before
+        wordcounts_with_startday = [(startday_before(x[0]), x[0], x[4]) for x in data]
+        wordcounts_by_startday = {}
+        for startday, day, wordcount in wordcounts_with_startday:
+            wordcounts = wordcounts_by_startday.setdefault(startday, [])
             wordcounts.append((day, wordcount))
-        last_by_sunday = sorted([
+        last_by_startday = sorted([
             (k, sorted(v, key=lambda x: x[0])[-1][1])
-            for k, v in wordcounts_by_sunday.items()], key=lambda x: x[0])
+            for k, v in wordcounts_by_startday.items()], key=lambda x: x[0])
 
-        diffs = np.diff([starting_wordcount] + [x[1] for x in last_by_sunday])
-        sundays = [x[0] for x in last_by_sunday]
+        diffs = np.diff([starting_wordcount] + [x[1] for x in last_by_startday])
+        startdays = [x[0] for x in last_by_startday]
 
         title = "Words Written per Week - " + ids_string
         plt.clf()
-        plt.bar(range(len(diffs)), diffs, tick_label=sundays)
+        plt.bar(range(len(diffs)), diffs, tick_label=startdays)
         plt.xticks(fontsize=8)
         plt.title(title)
         plt.xlabel("datetime")
