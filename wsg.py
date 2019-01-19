@@ -35,8 +35,6 @@ class WordCount(object):
     words = attr.ib()
 
 
-CACHE_FILENAME = "wordcounts.pkl"
-
 if hasattr(subprocess, "DEVNULL"):
     DEVNULL = subprocess.DEVNULL
 else:
@@ -104,7 +102,7 @@ def parse_secondary_file(filename):
 def secondary_wordcounts(ids, input_dir, ext):
     """count words of secondary files by item id or name"""
     docs = [f for f in os.listdir(input_dir) if f.endswith(ext)]
-    wordcounts = {}
+    wordcounts = {x: WordCount(None, 0, 0) for x in ids}
     for filename in docs:
         items = parse_secondary_file(os.path.join(input_dir, filename))
         for item in items:
@@ -121,11 +119,17 @@ def main(argv):
     """main program"""
 
     input_dir = "content"
+
     ids = argv[1:]
+
+    # unique name based on set of ids
+    config_name = ";".join(ids)
+    cache_filename = config_name + "_wordcount.pkl"
+
     get_wordcounts = lambda: secondary_wordcounts(ids, input_dir, ".sec")
 
-    if os.path.exists(CACHE_FILENAME):
-        with open(CACHE_FILENAME, "rb") as cache_file:
+    if os.path.exists(cache_filename):
+        with open(cache_filename, "rb") as cache_file:
             all_wordcounts = pickle.load(cache_file)
     else:
         all_wordcounts = {}
@@ -154,19 +158,28 @@ def main(argv):
         # extract the data for the current set of ids
         data = []
         for commit, wordcounts in all_wordcounts.items():
-            total_lines = sum([wordcounts[x].lines for x in ids])
-            total_words = sum([wordcounts[x].words for x in ids])
+            total_lines = sum([x.lines for x in wordcounts.values()])
+            total_words = sum([x.words for x in wordcounts.values()])
             row = (commit.date, commit.subject, commit.hash, total_lines, total_words)
             data.append(row)
         data = sorted(data, key=lambda x: x[0])
 
-        with open("wordcounts.tsv", "w") as output_file:
+        # keep everything between the first and last dates with
+        # nonzero wordcount changes
+        data_wordcounts = [x[4] for x in data]
+        data_deltas = [x - y for x, y in zip(data_wordcounts, [0] + data_wordcounts[:-1])]
+        nonzero_dates = [x[0] for x, y in zip(data, data_deltas) if y != 0]
+        date_first = nonzero_dates[0]
+        date_last = nonzero_dates[-1]
+        data = [x for x in data if x[0] >= date_first and x[0] <= date_last]
+
+        with open(config_name + "_wordcounts.tsv", "w") as output_file:
             output_file.write("\t".join(["date", "subject", "hash", "lines", "words"]) + "\n")
             for row in data:
                 output_file.write("\t".join([str(x) for x in row]) + "\n")
 
         # save the cache
-        with open(CACHE_FILENAME, "wb") as cache_file:
+        with open(cache_filename, "wb") as cache_file:
             pickle.dump(all_wordcounts, cache_file)
 
         # -------- plot total word count after each commit --------
@@ -206,7 +219,7 @@ def main(argv):
         fig = plt.gcf()
         fig.autofmt_xdate()
         fig.set_size_inches(8, 6)
-        fig.savefig("wordcounts.png", dpi=100)
+        fig.savefig(config_name + "_wordcounts.png", dpi=100)
         # plt.show()
 
         # -------- aggregate words written per week --------
@@ -237,7 +250,7 @@ def main(argv):
         fig = plt.gcf()
         fig.autofmt_xdate()
         fig.set_size_inches(8, 6)
-        fig.savefig("weeks.png", dpi=100)
+        fig.savefig(config_name + "_weeks.png", dpi=100)
 
     finally:
         git_checkout("master")
