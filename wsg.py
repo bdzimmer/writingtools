@@ -13,6 +13,7 @@ import os
 import pickle
 import re
 import subprocess
+import string
 import sys
 
 import attr
@@ -95,6 +96,15 @@ def parse_secondary_file(filename):
 
     if item is not None and len(item) > 0:
         items.append(item)
+
+    for item in items:
+        if item.get("id") is None and item.get("name") is not None:
+            item_id = item.get("name")
+            item_id = item_id.lower()
+            for c in string.punctuation:
+                item_id = item_id.replace(c, "")
+            item_id = item_id.replace(" ", "_")
+            item["id"] = item_id
 
     return items
 
