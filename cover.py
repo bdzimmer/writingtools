@@ -8,9 +8,73 @@ Create book covers programatically.
 import os
 import json
 import sys
+import time
 
 from PIL import Image, ImageFont, ImageDraw
 import numpy as np
+
+DEBUG = True
+
+def text_custom_kerning(text, font, color, kern_add):
+    """text, controlling letter spacing"""
+
+    letter_sizes = [font.getsize(x) for x in text]
+    letter_offsets = [font.getoffset(x) for x in text]
+    letter_pairs = [text[idx:(idx + 2)] for idx in range(len(text) - 1)]
+    print(letter_pairs)
+    letter_pair_sizes = [font.getsize(x) for x in letter_pairs]
+    letter_pair_offsets = [font.getoffset(x) for x in letter_pairs]
+
+    print("ind widths:  ", [x[0] for x in letter_sizes])
+    print("ind offsets: ", [x[0] for x in letter_offsets])
+    print("pair widths: ", [x[0] for x in letter_pair_sizes])
+    print("pair offsets:", [x[0] for x in letter_pair_offsets])
+
+    # kerning "width" for a letter is width of pair
+    # minus the width of the individual second letter
+    widths = [
+        (x[0] + z[0]) - (y[0] + w[0])
+        for x, y, z, w in zip(
+            letter_pair_sizes, letter_sizes[1:], letter_offsets[:-1], letter_offsets[1:])]
+
+    # final width is width of final letter
+    widths = widths + [letter_sizes[-1][0] + letter_offsets[-1][0]]
+
+    print("true widths:", widths)
+    print("sum ind. widths:", sum([x[0] for x in letter_sizes]))
+
+    print("getsize width:  ", font.getsize(text)[0])
+
+    # TODO: this is potentially unsafe - not sure about descenders etc
+    # TODO: y offset?
+    # find maximum height
+    height = max([x[1] for x in letter_sizes])
+
+    offset_x_first = letter_offsets[0][0]
+    width_total = sum(widths) - offset_x_first + (len(widths) - 1) * kern_add
+
+    print("width_total:   ", width_total)
+
+    image = Image.new("RGBA", (width_total, height), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(image)
+
+    # TODO: add kerning amount
+    offset = 0 - offset_x_first
+    for letter, letter_width in zip(text, widths):
+        draw.text((offset, 0), letter, font=font, fill=color)
+        offset = offset + letter_width + kern_add
+
+    return image
+
+
+def text_standard(text, font, color):
+    size = font.getsize(text)
+    offset = font.getoffset(text)
+    image = Image.new("RGBA", (size[0], size[1]), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(image)
+    # TODO: how to use offset here?
+    draw.text((0 - offset[0], 0), text, font=font, fill=color)
+    return image
 
 
 def render_layer(layer, resources_dirname):
@@ -20,26 +84,26 @@ def render_layer(layer, resources_dirname):
         image_pil = Image.open(
             os.path.join(resources_dirname, layer["filename"]))
         image = np.array(image_pil)
-        print(image.shape)
         if image.shape[2] == 3:
             image = add_alpha(image)
     elif layer_type == "text":
-        font = ImageFont.truetype(
-            layer["font"],
-            layer["size"])
+        font = ImageFont.truetype(layer["font"], layer["size"])
         text = layer["text"]
         color = tuple(layer.get("color", (0, 0, 0, 255)))
-        size = font.getsize(text)
-        image = Image.new("RGBA", size, (255, 255, 255, 0))
-        draw = ImageDraw.Draw(image)
-        draw.text((0, 0), text, font=font, fill=color)
-        image = np.array(image)
+        kern_add = layer.get("kern_add", 0)
+        image = text_standard(text, font, color)
+        image_custom = text_custom_kerning(text, font, color, kern_add)
+        if DEBUG:
+            image.save("text_" + text + "_true.png")
+            image_custom.save("text_" + text + "_custom.png")
+        image = np.array(image_custom)
     else:
         image = None
     return image
 
 
 def add_alpha(image):
+    """add alpha channel"""
     return np.concatenate(
         (image,
          np.ones((image.shape[0], image.shape[1], 1), dtype=np.ubyte) * 255),
@@ -47,6 +111,7 @@ def add_alpha(image):
 
 
 def trim(layer_image, layer_x, layer_y, canvas_width, canvas_height):
+    """change"""
     start_x = 0
     end_x = layer_image.shape[1]
     start_y = 0
@@ -95,7 +160,6 @@ def expand_border(image, border_x, border_y):
     # res.paste(image, (border_x, border_y), mask)
 
     res = np.array(res)
-    print(res.shape, image.shape)
     lim_y = res.shape[0] - border_y if border_y > 0 else res.shape[0]
     lim_x = res.shape[1] - border_x if border_x > 0 else res.shape[1]
 
@@ -105,6 +169,8 @@ def expand_border(image, border_x, border_y):
 
 def main(argv):
     """main program"""
+
+    start_time = time.time()
 
     input_filename = argv[1]
     project_dirname = os.path.splitext(input_filename)[0]
@@ -122,12 +188,12 @@ def main(argv):
     res = Image.new("RGB", (canvas_width, canvas_height), (255, 255, 255))
 
     for layer_idx, layer in enumerate(config["layers"]):
+        print("layer", layer_idx, "...", end="", flush=True)
 
         # ~~~~ render
 
         layer_image = render_layer(
             layer, resources_dirname)
-        print(layer_image.shape)
 
         # ~~~~ add borders
 
@@ -166,11 +232,17 @@ def main(argv):
 
         image_pil.save(
             os.path.join(
-                project_dirname, str(layer_idx).rjust(3) + ".png"))
+                project_dirname, str(layer_idx).rjust(3, "0") + ".png"))
+
+        print("done")
 
     res.save(
         os.path.join(
             project_dirname, "final.png"))
+
+    end_time = time.time()
+    total_time = end_time - start_time
+    print("total time:", round(total_time, 3), "sec")
 
 
 if __name__ == "__main__":
