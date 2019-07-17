@@ -5,8 +5,9 @@ Create book covers programatically.
 
 # Copyright (c) 2019 Ben Zimmer. All rights reserved.
 
-import os
 import json
+import math
+import os
 import sys
 import time
 
@@ -86,6 +87,33 @@ def render_layer(layer, resources_dirname):
         image = np.array(image_pil)
         if image.shape[2] == 3:
             image = add_alpha(image)
+    elif layer_type == "gaussian":
+        width = layer["width"]
+        height = layer["height"]
+        a = layer["a"]
+        x = layer.get("x", width * 0.5)
+        y = layer.get("y", height * 0.5)
+        sigma_x = layer.get("sigma_x", width * 0.5)
+        sigma_y = layer.get("sigma_y", height * 0.5)
+        transparent = layer.get("transparent", True)
+
+        d_x = 2.0 * sigma_x * sigma_x
+        d_y = 2.0 * sigma_y * sigma_y
+
+        ivals = np.tile(np.arange(height).reshape(-1, 1), (1, width))
+        jvals = np.tile(np.arange(width), (height, 1))
+        image = a * np.exp(
+            0.0 - (((ivals - y) ** 2) / d_y + ((jvals - x) ** 2) / d_x))
+        image = np.clip(image, 0.0, 255.0)
+        image = np.array(image, dtype=np.ubyte)
+
+        if transparent:
+            black = np.zeros((height, width), dtype=np.ubyte)
+            image = np.stack((black, black, black, 255 - image), axis=2)
+        else:
+            image = np.stack((image, image, image), axis=2)
+            image = add_alpha(image)
+
     elif layer_type == "text":
         font = ImageFont.truetype(layer["font"], layer["size"])
         text = layer["text"]
