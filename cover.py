@@ -1,4 +1,5 @@
 """
+
 Create book covers programatically.
 
 """
@@ -6,15 +7,16 @@ Create book covers programatically.
 # Copyright (c) 2019 Ben Zimmer. All rights reserved.
 
 import json
-import math
 import os
 import sys
 import time
 
+import cv2
 from PIL import Image, ImageFont, ImageDraw
 import numpy as np
 
 DEBUG = True
+
 
 def text_custom_kerning(text, font, color, kern_add):
     """text, controlling letter spacing"""
@@ -26,11 +28,6 @@ def text_custom_kerning(text, font, color, kern_add):
     letter_pair_sizes = [font.getsize(x) for x in letter_pairs]
     letter_pair_offsets = [font.getoffset(x) for x in letter_pairs]
 
-    print("ind widths:  ", [x[0] for x in letter_sizes])
-    print("ind offsets: ", [x[0] for x in letter_offsets])
-    print("pair widths: ", [x[0] for x in letter_pair_sizes])
-    print("pair offsets:", [x[0] for x in letter_pair_offsets])
-
     # kerning "width" for a letter is width of pair
     # minus the width of the individual second letter
     widths = [
@@ -38,13 +35,8 @@ def text_custom_kerning(text, font, color, kern_add):
         for x, y, z, w in zip(
             letter_pair_sizes, letter_sizes[1:], letter_offsets[:-1], letter_offsets[1:])]
 
-    # final width is width of final letter
+    # add width of final letter
     widths = widths + [letter_sizes[-1][0] + letter_offsets[-1][0]]
-
-    print("true widths:", widths)
-    print("sum ind. widths:", sum([x[0] for x in letter_sizes]))
-
-    print("getsize width:  ", font.getsize(text)[0])
 
     # TODO: this is potentially unsafe - not sure about descenders etc
     # TODO: y offset?
@@ -54,12 +46,19 @@ def text_custom_kerning(text, font, color, kern_add):
     offset_x_first = letter_offsets[0][0]
     width_total = sum(widths) - offset_x_first + (len(widths) - 1) * kern_add
 
-    print("width_total:   ", width_total)
+    if DEBUG:
+        print("ind widths:     ", [x[0] for x in letter_sizes])
+        print("ind offsets:    ", [x[0] for x in letter_offsets])
+        print("pair widths:    ", [x[0] for x in letter_pair_sizes])
+        print("pair offsets:   ", [x[0] for x in letter_pair_offsets])
+        print("true widths:    ", widths)
+        print("sum ind. widths:", sum([x[0] for x in letter_sizes]))
+        print("getsize width:  ", font.getsize(text)[0])
+        print("width_total:    ", width_total)
 
     image = Image.new("RGBA", (width_total, height), (255, 255, 255, 0))
     draw = ImageDraw.Draw(image)
 
-    # TODO: add kerning amount
     offset = 0 - offset_x_first
     for letter, letter_width in zip(text, widths):
         draw.text((offset, 0), letter, font=font, fill=color)
@@ -69,6 +68,8 @@ def text_custom_kerning(text, font, color, kern_add):
 
 
 def text_standard(text, font, color):
+    """standard text rendering"""
+
     size = font.getsize(text)
     offset = font.getoffset(text)
     image = Image.new("RGBA", (size[0], size[1]), (255, 255, 255, 0))
@@ -79,7 +80,8 @@ def text_standard(text, font, color):
 
 
 def render_layer(layer, resources_dirname):
-    # render a layer
+    """render a single layer"""
+
     layer_type = layer["type"]
     if layer_type == "image":
         image_pil = Image.open(
@@ -93,8 +95,8 @@ def render_layer(layer, resources_dirname):
         a = layer["a"]
         x = layer.get("x", width * 0.5)
         y = layer.get("y", height * 0.5)
-        sigma_x = layer.get("sigma_x", width * 0.5)
-        sigma_y = layer.get("sigma_y", height * 0.5)
+        sigma_x = layer.get("sigma_x", width * 0.75)
+        sigma_y = layer.get("sigma_y", height * 0.75)
         transparent = layer.get("transparent", True)
 
         d_x = 2.0 * sigma_x * sigma_x
@@ -131,7 +133,7 @@ def render_layer(layer, resources_dirname):
 
 
 def add_alpha(image):
-    """add alpha channel"""
+    """add an alpha channel to an image"""
     return np.concatenate(
         (image,
          np.ones((image.shape[0], image.shape[1], 1), dtype=np.ubyte) * 255),
@@ -139,7 +141,8 @@ def add_alpha(image):
 
 
 def trim(layer_image, layer_x, layer_y, canvas_width, canvas_height):
-    """change"""
+    """trim the layer to fit the canvas"""
+
     start_x = 0
     end_x = layer_image.shape[1]
     start_y = 0
@@ -170,6 +173,22 @@ def apply_effect(image, effect):
         opacity = effect["opacity"]
         transparent = Image.new("RGBA", (image.shape[1], image.shape[0]), (255, 255, 255, 0))
         image = np.array(Image.blend(transparent, Image.fromarray(image), opacity))
+    elif effect_type == "glow":
+        dilate_size = effect.get("dilate", 16)
+        blur_size = effect.get("blur", 127)
+        color = tuple(effect.get("color", (0, 0, 0)))
+
+        edge = cv2.Canny(image, 100, 200)
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (dilate_size, dilate_size))
+        edge = cv2.dilate(edge, kernel)
+        edge = cv2.GaussianBlur(edge, (blur_size, blur_size), 0)
+        color = np.array(color, dtype=np.ubyte)
+        glow = np.tile(np.reshape(color, (1, 1, 3)), (image.shape[0], image.shape[1], 1))
+        glow = np.concatenate((glow, np.expand_dims(edge, axis=2)), axis=2)
+        glow = Image.fromarray(glow)
+        glow.paste(Image.fromarray(image), (0, 0), Image.fromarray(image))
+        image = np.array(glow)
     else:
         print("\tunrecognized effect type '" + str(effect_type) + "'")
 
@@ -177,13 +196,14 @@ def apply_effect(image, effect):
 
 
 def expand_border(image, border_x, border_y):
-    """add a border"""
+    """add a border to an image"""
+
     res = Image.new(
         "RGBA",
         (image.shape[1] + 2 * border_x, image.shape[0] + 2 * border_y),
         (255, 255, 255, 0))
 
-    # not sure why this wasn't working
+    # not sure why this doesn't work
     # mask = Image.fromarray(image)
     # res.paste(image, (border_x, border_y), mask)
 
@@ -206,7 +226,6 @@ def main(argv):
     with open(input_filename, "r") as input_file:
         config = json.load(input_file)
 
-    print(config)
     resources_dirname = config["resources_dirname"]
     canvas_width = config["width"]
     canvas_height = config["height"]
