@@ -10,10 +10,6 @@ Count words from [Secondary](https://github.com/bdzimmer/secondary) items across
 
 where id1, id2, id3 ... are ids or names of Secondary items. Produces graphs of total word count and words written per week across commits.
 
-#### cover
-
-Create cover images via JSON description of image and text layers with various layer effects.
-
 #### epub
 
 Experimentation with generating [EPUB](https://en.wikipedia.org/wiki/EPUB) files.
