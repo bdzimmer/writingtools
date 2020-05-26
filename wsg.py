@@ -210,7 +210,7 @@ def main(argv):
 
         date_first = data[0][0]
         date_last = max(x[0] for x in data)
-        starting_wordcount = data[0][4]
+
         graph_start_date = startday_before(date_first)
         graph_end_date = startday_before(date_last + datetime.timedelta(7))
         days_count = (graph_end_date - graph_start_date).days
@@ -237,6 +237,9 @@ def main(argv):
         # plt.show()
 
         # -------- aggregate words written per week --------
+
+        # starting_wordcount = data[0][4]
+        starting_wordcount = 0
 
         # group by start day before
         wordcounts_with_startday = [(startday_before(x[0]), x[0], x[4]) for x in data]
