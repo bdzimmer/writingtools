@@ -29,6 +29,11 @@ START_EXPECTED = {
     402.143         # chapter title pages
 }
 
+FONT_WEIGHT_MAPPING = {
+    "/F34": "regular",
+    "/F32": "bold"
+}
+
 
 def main(argv):
     """main program"""
@@ -57,16 +62,17 @@ def main(argv):
 
     # skip title page and following blank page
 
-    for idx, ops in enumerate(ops_by_page):
+    for idx_page, ops in enumerate(ops_by_page):
 
-        if idx < 2:
+        if idx_page < 2:
             continue
 
         if len(ops) == 0:
             continue
 
-        # for operands, operator in ops:
-        #     print(operator, operands)
+        if DEBUG:
+            for idx_op, (operands, operator) in enumerate(ops):
+                print(idx + 1, idx_op, operator, operands)
 
         # It appears that most pages only use these ops:
         # {b'TJ', b'Td', b'BT', b'ET', b'Tf'}
@@ -83,7 +89,7 @@ def main(argv):
         y_start_unexpected = y_start not in START_EXPECTED
 
         if DEBUG or len(y_unexpected) > 1 or y_start_unexpected:
-            print("page", idx + 1)
+            print("page", idx_page + 1)
             print("y start:", y_start, "(unexpected)" if y_start_unexpected else "")
             print("distinct y spacing values:", y_distinct)
             print("unexpected y spacing values:", y_unexpected)
@@ -101,11 +107,6 @@ def extract_ops(page: PageObject) -> List[Tuple]:
 def line_spacing_info(ops: List[Tuple]) -> Tuple[float, List[float]]:
     """find line spacing info by page"""
 
-    font_weight_mapping = {
-        "/F31": "regular",
-        "/F32": "bold"
-    }
-
     font_switches = [
         (idx, operands)
         for idx, (operands, operator) in enumerate(ops)
@@ -113,7 +114,7 @@ def line_spacing_info(ops: List[Tuple]) -> Tuple[float, List[float]]:
 
     # (idx, weight, size)
     font_changes = [
-        (idx, font_weight_mapping.get(str(operands[0])), operands[1])
+        (idx, FONT_WEIGHT_MAPPING.get(str(operands[0])), operands[1])
         for idx, operands in font_switches]
 
     operators = [x[1] for x in ops]
