@@ -25,7 +25,8 @@ TEXT_SHOW_OPS = [  # page 311
 SPACING_EXPECTED = {-14.445, -14.446}
 START_EXPECTED = {
     528.045,        # normal pages
-    400.95          # chapter title pages
+    # 400.95        # chapter title pages
+    402.143         # chapter title pages
 }
 
 
@@ -55,9 +56,11 @@ def main(argv):
     # ~~~~ check line spacing ~~~~
 
     # skip title page and following blank page
-    pages_to_check = ops_by_page[2:]
 
-    for idx, ops in enumerate(pages_to_check):
+    for idx, ops in enumerate(ops_by_page):
+
+        if idx < 2:
+            continue
 
         if len(ops) == 0:
             continue
@@ -80,7 +83,7 @@ def main(argv):
         y_start_unexpected = y_start not in START_EXPECTED
 
         if DEBUG or len(y_unexpected) > 1 or y_start_unexpected:
-            print("page", idx)
+            print("page", idx + 1)
             print("y start:", y_start, "(unexpected)" if y_start_unexpected else "")
             print("distinct y spacing values:", y_distinct)
             print("unexpected y spacing values:", y_unexpected)
